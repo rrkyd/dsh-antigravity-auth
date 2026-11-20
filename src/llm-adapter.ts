@@ -934,6 +934,7 @@ function buildPayloadFromContents(
   if (options.maxTokens !== undefined) generationConfig.maxOutputTokens = boundedInteger(options.maxTokens, 1, 1_000_000, 'maxTokens')
   else if (usesCapturedGemini38ThinkingBudget) generationConfig.maxOutputTokens = 65536
   else if (wireFamily !== undefined) generationConfig.maxOutputTokens = GEMINI4_OUTPUT_TOKENS[wireFamily]
+  else if (/orchestrator/u.test(wireModel)) generationConfig.maxOutputTokens = 65536
   if (options.temperature !== undefined) generationConfig.temperature = boundedNumber(options.temperature, -100, 100, 'temperature')
   if (options.stop !== undefined) generationConfig.stopSequences = options.stop.slice(0, 16).map(item => item.slice(0, 256))
   if (options.reasoningEffort !== undefined && wireFamily === undefined) generationConfig.thinkingConfig = { thinkingLevel: String(options.reasoningEffort) }
