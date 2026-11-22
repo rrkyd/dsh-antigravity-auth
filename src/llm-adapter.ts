@@ -58,6 +58,7 @@ import {
   type AntigravityReplayBlock,
 } from './replay.ts'
 import { ANTIGRAVITY_WIRE_ORIGIN } from './wire-identity.ts'
+import { assertNotRateFused, buildGuardedRequestBody, noteRateLimit } from './request-guard.ts'
 import { classifyPrivateFailure, type PrivateFailureKind } from './private-failure.ts'
 import { RATE_LIMIT_MESSAGE, readRateLimitDiagnostics, rateLimitMessage } from './rate-limit-diagnostics.ts'
 import type { AntigravityModelCatalogState, AntigravityModelCatalogView } from './model-catalog.ts'
@@ -304,6 +305,7 @@ export class AntigravityAdapter extends LlmAdapter {
       }
       const sessionKey = requestSessionKey(options)
       const requestScope = this.sessions.beginRequest(sessionKey)
+      assertNotRateFused()
       let payload: Record<string, unknown>
       try {
         payload = await buildAntigravityGeneratePayloadForAdapter(options, credential, requestScope.session, requestScope.timestamp, this.adapterOptions.attachments)
@@ -311,12 +313,13 @@ export class AntigravityAdapter extends LlmAdapter {
         if (error instanceof LlmError) throw error
         throw new LlmError('The Antigravity image input could not be admitted safely', 'UNSUPPORTED_MODALITY')
       }
+      const body = buildGuardedRequestBody(payload)
       let response: Response
       try {
         response = await this.transport.request({
           url: ANTIGRAVITY_STREAM_ENDPOINT,
           accessToken: credential.accessToken,
-          body: JSON.stringify(payload),
+          body,
           ...(signal === undefined ? {} : { signal }),
           responseHeaderTimeoutMs: this.options.responseHeaderTimeoutMs,
         })
@@ -326,6 +329,7 @@ export class AntigravityAdapter extends LlmAdapter {
       const statusError = privateStatusError(response.status)
       if (statusError !== undefined) {
         if (response.status === 429) {
+          noteRateLimit()
           const diagnostics = await readRateLimitDiagnostics(response, signal)
           if (isAborted(signal)) throw new LlmError('The Antigravity request was cancelled', 'CANCELLED')
           throw new LlmError(rateLimitMessage(diagnostics), 'RATE_LIMIT', {

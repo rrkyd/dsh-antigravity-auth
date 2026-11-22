@@ -6,6 +6,7 @@
 
 - Gemini 4 Neon (`gemini-4-neon-{low,medium,high,xhigh}`) and the two Orchestrator routes (`gemini-pro-orchestrator-neon`, `gemini-pro-orchestrator-g1-pro`) in the live-catalog filter and effort picker (Orchestrator exposes no effort).
 - `scripts/apply-core-models.mjs` + `scripts/core-models.patch`: idempotently register those routes in the installed `@cortexkit/antigravity-auth-core@3.1.2`, whose model registry is hardcoded (run after every install; `maxOutputTokens` for Neon/Orchestrator are estimates).
+- Request-shape gate (`src/request-guard.ts`): an agent request whose body size or rate-limit history looks unlike the audited `agy` client is refused before it reaches the wire, instead of being sent and answered with a 429. The body is capped at 256 KB (blocking), an oversized tool catalog or `systemInstruction` only emits an `ANTIGRAVITY_REQUEST_SHAPE` warning, and three rate-limit verdicts inside ten minutes open a fuse that fails the next turn locally. Knobs: `ANTIGRAVITY_MAX_TOOLS`, `ANTIGRAVITY_MAX_REQUEST_BYTES`, `ANTIGRAVITY_MAX_SYSTEM_BYTES`, `ANTIGRAVITY_RATE_FUSE`, `ANTIGRAVITY_RATE_FUSE_WINDOW_MS`. Wire identity is untouched.
 
 ## [0.1.12] - 2026-11-17
 
