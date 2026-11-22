@@ -1,4 +1,4 @@
-/** Public DSH LLM adapter for the single Antigravity provider route. */
+﻿/** Public DSH LLM adapter for the single Antigravity provider route. */
 
 import { Buffer } from 'node:buffer'
 import {
@@ -58,7 +58,7 @@ import {
   type AntigravityReplayBlock,
 } from './replay.ts'
 import { ANTIGRAVITY_WIRE_ORIGIN } from './wire-identity.ts'
-import { assertNotRateFused, buildGuardedRequestBody, noteRateLimit } from './request-guard.ts'
+import { buildGuardedRequestBody, createRateFuse } from './request-guard.ts'
 import { classifyPrivateFailure, type PrivateFailureKind } from './private-failure.ts'
 import { RATE_LIMIT_MESSAGE, readRateLimitDiagnostics, rateLimitMessage } from './rate-limit-diagnostics.ts'
 import type { AntigravityModelCatalogState, AntigravityModelCatalogView } from './model-catalog.ts'
@@ -175,6 +175,7 @@ export class AntigravityAdapter extends LlmAdapter {
   private readonly options: Required<Pick<AntigravityAdapterOptions, 'idleTimeoutMs' | 'totalTimeoutMs' | 'maxResponseBytes' | 'maxFrameBytes'>> & {
     readonly responseHeaderTimeoutMs: number
   }
+  private readonly rateFuse = createRateFuse()
   private readonly definitions = getPublicModelDefinitions()
   private catalogProjectId: string | undefined
   private catalogExpiresAt = 0
@@ -305,7 +306,7 @@ export class AntigravityAdapter extends LlmAdapter {
       }
       const sessionKey = requestSessionKey(options)
       const requestScope = this.sessions.beginRequest(sessionKey)
-      assertNotRateFused()
+      this.rateFuse.assertClosed()
       let payload: Record<string, unknown>
       try {
         payload = await buildAntigravityGeneratePayloadForAdapter(options, credential, requestScope.session, requestScope.timestamp, this.adapterOptions.attachments)
@@ -329,7 +330,7 @@ export class AntigravityAdapter extends LlmAdapter {
       const statusError = privateStatusError(response.status)
       if (statusError !== undefined) {
         if (response.status === 429) {
-          noteRateLimit()
+          this.rateFuse.note()
           const diagnostics = await readRateLimitDiagnostics(response, signal)
           if (isAborted(signal)) throw new LlmError('The Antigravity request was cancelled', 'CANCELLED')
           throw new LlmError(rateLimitMessage(diagnostics), 'RATE_LIMIT', {

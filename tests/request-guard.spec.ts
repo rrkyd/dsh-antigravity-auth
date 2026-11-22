@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   RequestShapeError,
-  assertNotRateFused,
   buildGuardedRequestBody,
+  createRateFuse,
   inspectRequestShape,
-  noteRateLimit,
-  resetRateFuseForTest,
   shapeLimits,
+  type RateFuse,
 } from '../src/request-guard.ts'
 
 function payloadWith(toolCount: number, systemText = 'system'): Record<string, unknown> {
@@ -29,8 +28,9 @@ function payloadWith(toolCount: number, systemText = 'system'): Record<string, u
 }
 
 describe('request shape gate', () => {
+  let fuse: RateFuse
   beforeEach(() => {
-    resetRateFuseForTest()
+    fuse = createRateFuse()
     delete process.env['ANTIGRAVITY_MAX_TOOLS']
     delete process.env['ANTIGRAVITY_MAX_REQUEST_BYTES']
     delete process.env['ANTIGRAVITY_MAX_SYSTEM_BYTES']
@@ -71,11 +71,11 @@ describe('request shape gate', () => {
   it('opens the fuse after three rate-limit responses and closes after the window', () => {
     const limits = shapeLimits()
     const start = 1_000_000
-    noteRateLimit(start, limits)
-    noteRateLimit(start + 1_000, limits)
-    expect(() => assertNotRateFused(start + 2_000, limits)).not.toThrow()
-    noteRateLimit(start + 2_000, limits)
-    expect(() => assertNotRateFused(start + 3_000, limits)).toThrow(/rate-limit responses within/)
-    expect(() => assertNotRateFused(start + limits.rateLimitWindowMs + 5_000, limits)).not.toThrow()
+    fuse.note(start, limits)
+    fuse.note(start + 1_000, limits)
+    expect(() => fuse.assertClosed(start + 2_000, limits)).not.toThrow()
+    fuse.note(start + 2_000, limits)
+    expect(() => fuse.assertClosed(start + 3_000, limits)).toThrow(/rate-limit responses within/)
+    expect(() => fuse.assertClosed(start + limits.rateLimitWindowMs + 5_000, limits)).not.toThrow()
   })
 })

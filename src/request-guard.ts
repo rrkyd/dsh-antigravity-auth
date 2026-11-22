@@ -139,20 +139,10 @@ export function buildGuardedRequestBody(
   return body
 }
 
-// ponytail: one process-wide fuse, not one per account. Switching to a fresh
-// account clears it only after the window passes; key it by credential if a
-// multi-account rotation ever lands in this plugin.
-const rateLimitHits: number[] = []
-
-function pruneRateLimitHits(now: number, limits: RequestShapeLimits): void {
-  const cutoff = now - limits.rateLimitWindowMs
-  while (rateLimitHits.length > 0 && (rateLimitHits[0] ?? 0) < cutoff) rateLimitHits.shift()
-}
-
-export function noteRateLimit(now: number = Date.now(), limits: RequestShapeLimits = shapeLimits()): number {
-  rateLimitHits.push(now)
-  pruneRateLimitHits(now, limits)
-  return rateLimitHits.length
+export interface RateFuse {
+  note(now?: number, limits?: RequestShapeLimits): number
+  assertClosed(now?: number, limits?: RequestShapeLimits): void
+  reset(): void
 }
 
 /**
@@ -160,17 +150,34 @@ export function noteRateLimit(now: number = Date.now(), limits: RequestShapeLimi
  * pre-existing contract is that a 429 is reported without a resend, so the only
  * thing left to protect is the next turn, which would otherwise ask for the same
  * refused shape again.
+ *
+ * ponytail: one fuse per adapter instance — that is one per plugin process in
+ * production, and one per test cassette in tests. Key it by credential if a
+ * multi-account rotation ever lands in this plugin.
  */
-export function assertNotRateFused(now: number = Date.now(), limits: RequestShapeLimits = shapeLimits()): void {
-  pruneRateLimitHits(now, limits)
-  if (rateLimitHits.length < limits.rateLimitFuse) return
-  throw new RequestShapeError([
-    `${rateLimitHits.length} rate-limit responses within ${Math.max(1, Math.round(limits.rateLimitWindowMs / 60_000))} min`,
-    'The fuse is open: this account keeps asking for the same refused request shape.',
-    'Stop issuing agent turns here until the window passes.',
-  ])
-}
-
-export function resetRateFuseForTest(): void {
-  rateLimitHits.length = 0
+export function createRateFuse(): RateFuse {
+  const hits: number[] = []
+  const prune = (now: number, limits: RequestShapeLimits): void => {
+    const cutoff = now - limits.rateLimitWindowMs
+    while (hits.length > 0 && (hits[0] ?? 0) < cutoff) hits.shift()
+  }
+  return {
+    note(now: number = Date.now(), limits: RequestShapeLimits = shapeLimits()): number {
+      hits.push(now)
+      prune(now, limits)
+      return hits.length
+    },
+    assertClosed(now: number = Date.now(), limits: RequestShapeLimits = shapeLimits()): void {
+      prune(now, limits)
+      if (hits.length < limits.rateLimitFuse) return
+      throw new RequestShapeError([
+        `${hits.length} rate-limit responses within ${Math.max(1, Math.round(limits.rateLimitWindowMs / 60_000))} min`,
+        'The fuse is open: this account keeps asking for the same refused request shape.',
+        'Stop issuing agent turns here until the window passes.',
+      ])
+    },
+    reset(): void {
+      hits.length = 0
+    },
+  }
 }
